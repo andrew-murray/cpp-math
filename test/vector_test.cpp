@@ -1,6 +1,13 @@
 #include <boost/test/unit_test.hpp>
 
+#include <fstream>
+#include <iostream>
+
 #include "cpp-math/vector.hpp"
+
+#include "scoped_timer.hpp"
+
+#include <Windows.h>
 
 BOOST_AUTO_TEST_CASE(creation){
 
@@ -29,6 +36,16 @@ BOOST_AUTO_TEST_CASE(creation){
 		BOOST_CHECK_EQUAL((float)vector_with_zero.z(), z);
 		BOOST_CHECK_EQUAL((float)vector_with_zero.w(), 0.0f);
 
+	}
+
+	{
+
+		float1 vector_w(5.66e3f);
+		float4 vector(vector_w);
+		BOOST_CHECK_EQUAL( vector.w() , vector_w );
+		BOOST_CHECK_EQUAL( vector.x() , vector_w );
+		BOOST_CHECK_EQUAL( vector.y() , vector_w );
+		BOOST_CHECK_EQUAL( vector.z() , vector_w );
 	}
 
 	{
@@ -254,4 +271,278 @@ BOOST_AUTO_TEST_CASE(float4_arithmetic_tests){
 		BOOST_CHECK_EQUAL((b/c).w(),float1(w[1] / w[2]));
 	}
 
+}
+
+size_t filesize(std::ifstream& stream){
+	auto current = stream.tellg();
+	stream.seekg(0, std::ios_base::end);
+	auto end = stream.tellg();
+	stream.seekg(current, std::ios_base::beg);
+	return (size_t) end;
+}
+
+size_t filesize(std::ofstream& stream){
+	auto current = stream.tellp();
+	stream.seekp(0, std::ios_base::end);
+	auto end = stream.tellp();
+	stream.seekp(current, std::ios_base::beg);
+	return (size_t) end;
+}
+
+BOOST_AUTO_TEST_CASE(sse_register_seed){
+	std::ofstream seed("vector_test.dat",std::ios_base::binary);
+
+	std::vector<float4> vec(100000000);
+
+	if(filesize(seed) != sizeof(vec)){
+
+		#pragma omp parallel
+		for(int i = 0; i < vec.size(); i++){
+			vec[i] = (i % 2) ? float4((float)1.0f,1.0f,1.0f,2.0)
+							 : float4((float)1.0f,1.0f,1.0f,1.0f/2.0f);
+		}
+
+		seed.write((char*)&vec.front(), vec.size() * sizeof(float4));
+		seed.close();
+	
+		float4 product(1.0f, 1.0f, 1.0f, 1.0f);
+		for(int i = 0; i < vec.size(); ++i){
+			product = product * vec[i];
+		}
+	
+		for(int i = 0; i < vec.size(); ++i){
+			product = product * float4(vec[i].x());
+			product = product * float4(vec[i].y());
+			product = product * float4(vec[i].z());
+		}
+		
+		for(int i = 0; i < vec.size(); ++i){
+			product = product / float4(vec[i].x());
+			product = product / float4(vec[i].y());
+			product = product * float4(vec[i].w());
+		}
+	
+		std::cout 
+			<< (float)product.x() << ','  
+			<< (float)product.y() << ',' 
+			<< (float)product.z() << ',' 
+			<< (float)product.w() << std::endl;
+	}
+
+}
+
+
+BOOST_AUTO_TEST_CASE(not_staying_in_sse_registers_test){
+	std::ifstream seed("vector_test.dat",std::ios_base::binary);
+	size_t size = filesize(seed);
+	int float_size = int(size / 16);
+	BOOST_ALIGNMENT(16) std::vector<float4> vector(float_size);
+	
+	using metrics::instruments::scoped_timer;
+
+	seed.read((char*)&vector.front(), float_size * 4);
+	seed.close();
+	
+	scoped_timer<> timer(
+		[](const scoped_timer<>::duration& dur){ 
+			std::cout 
+				<< std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
+				<< " taken for " __FUNCTION__ << std::endl;
+		}
+	);
+
+	float4 product(1.0f, 1.0f, 1.0f, 1.0f);
+	for(int i = 0; i < float_size; ++i){
+		product = product * vector[i];
+	}
+	
+	for(int i = 0; i < float_size; ++i){
+		float x = (float)vector[i].x();
+		float y = (float)vector[i].y();
+		float z = (float)vector[i].z();
+
+		product = product * float4(x,x,x,x);
+		product = product * float4(y,y,y,y);
+		product = product * float4(z,z,z,z);
+	}
+	
+	for(int i = 0; i < float_size; ++i){
+		float x = (float)vector[i].x();
+		float y = (float)vector[i].y();
+		float w = (float)vector[i].w();
+
+		product = product / float4(x,x,x,x);
+		product = product / float4(y,y,y,y);
+		product = product * float4(w,w,w,w);
+	}
+	
+	std::cout << (float)product.x() << ','  << (float)product.y() << ',' << (float)product.z() << ',' << (float)product.w() << std::endl;
+
+
+
+}
+
+
+BOOST_AUTO_TEST_CASE(outside_sse_registers_without_value_duplication_test){
+	std::ifstream seed("vector_test.dat",std::ios_base::binary);
+	size_t size = filesize(seed);
+	int float_size = int(size / 16);
+	BOOST_ALIGNMENT(16) std::vector<float4> vector(float_size);
+	
+	using metrics::instruments::scoped_timer;
+
+	seed.read((char*)&vector.front(), float_size * 4);
+	seed.close();
+	
+	scoped_timer<> timer(
+		[](const scoped_timer<>::duration& dur){ 
+			std::cout 
+				<< std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
+				<< " taken for " __FUNCTION__ << std::endl;
+		}
+	);
+
+	float4 product(1.0f, 1.0f, 1.0f, 1.0f);
+	for(int i = 0; i < float_size; ++i){
+		product = product * vector[i];
+	}
+	
+	for(int i = 0; i < float_size; ++i){
+		float x = (float)vector[i].x();
+		float y = (float)vector[i].y();
+		float z = (float)vector[i].z();
+
+		product = product * float4::fill(x);
+		product = product * float4::fill(y);
+		product = product * float4::fill(z);
+	}
+	
+	for(int i = 0; i < float_size; ++i){
+		float x = (float)vector[i].x();
+		float y = (float)vector[i].y();
+		float w = (float)vector[i].w();
+
+		product = product / float4::fill(x);
+		product = product / float4::fill(y);
+		product = product * float4::fill(w);
+	}
+	
+	
+	std::cout << (float)product.x() << ','  << (float)product.y() << ',' << (float)product.z() << ',' << (float)product.w() << std::endl;
+
+
+
+}
+
+
+BOOST_AUTO_TEST_CASE(staying_in_sse_registers_test){
+
+	std::ifstream seed("vector_test.dat",std::ios_base::binary);
+
+	size_t size = filesize(seed);
+	int float_size = int(size / 16);
+	BOOST_ALIGNMENT(16) std::vector<float4> vector(float_size);
+
+	seed.read((char*)&vector.front(), float_size * 4);
+	seed.close();
+
+	using metrics::instruments::scoped_timer;
+
+	scoped_timer<> timer(
+		[](const scoped_timer<>::duration& dur){ 
+			std::cout 
+				<< std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
+				<< " taken for " __FUNCTION__ << std::endl;
+		}
+	);
+
+	float4 product(1.0f, 1.0f, 1.0f, 1.0f);
+	for(int i = 0; i < float_size; ++i){
+		product = product * vector[i];
+	}
+	
+	for(int i = 0; i < float_size; ++i){
+		product = product * float4(vector[i].x());
+		product = product * float4(vector[i].y());
+		product = product * float4(vector[i].z());
+	}
+	
+	for(int i = 0; i < float_size; ++i){
+		product = product / float4(vector[i].x());
+		product = product / float4(vector[i].y());
+		product = product * float4(vector[i].w());
+	}
+
+	std::cout << (float)product.x() << ','  << (float)product.y() << ',' << (float)product.z() << ',' << (float)product.w() << std::endl;
+}
+
+BOOST_AUTO_TEST_CASE(leaving_sse_registers_and_using_components_test){
+
+	std::ifstream seed("vector_test.dat",std::ios_base::binary);
+
+	size_t size = filesize(seed);
+	int float_size = int(size / 16);
+	BOOST_ALIGNMENT(16) std::vector<float4> vector(float_size);
+
+	seed.read((char*)&vector.front(), float_size * 4);
+	seed.close();
+
+	using metrics::instruments::scoped_timer;
+
+	scoped_timer<> timer(
+		[](const scoped_timer<>::duration& dur){ 
+			std::cout 
+				<< std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
+				<< " taken for " __FUNCTION__ << std::endl;
+		}
+	);
+
+	float4 product(1.0f, 1.0f, 1.0f, 1.0f);
+	for(int i = 0; i < float_size; ++i){
+		product = product * vector[i];
+	}
+	
+	std::cout << (float)product.x() << ','  << (float)product.y() << ',' << (float)product.z() << ',' << (float)product.w() << std::endl;
+
+	for(int i = 0; i < float_size; ++i){
+		product = float4((float)product.w(),((float)product.x()) + 1.0f,((float)product.z()*1.01),(float)product.y());
+	}
+
+	std::cout << (float)product.x() << ','  << (float)product.y() << ',' << (float)product.z() << ',' << (float)product.w() << std::endl;
+}
+
+BOOST_AUTO_TEST_CASE(using_sse_registers_and_using_swizzles_for_componentwise_things){
+
+	std::ifstream seed("vector_test.dat",std::ios_base::binary);
+
+	size_t size = filesize(seed);
+	int float_size = int(size / 16);
+	BOOST_ALIGNMENT(16) std::vector<float4> vector(float_size);
+
+	seed.read((char*)&vector.front(), float_size * 4);
+	seed.close();
+
+	using metrics::instruments::scoped_timer;
+
+	scoped_timer<> timer(
+		[](const scoped_timer<>::duration& dur){ 
+			std::cout 
+				<< std::chrono::duration_cast<std::chrono::milliseconds>(dur).count()
+				<< " taken for " __FUNCTION__ << std::endl;
+		}
+	);
+
+	float4 product(1.0f, 1.0f, 1.0f, 1.0f);
+	for(int i = 0; i < float_size; ++i){
+		product = product * vector[i];
+	}
+	
+	std::cout << (float)product.x() << ','  << (float)product.y() << ',' << (float)product.z() << ',' << (float)product.w() << std::endl;
+
+	for(int i = 0; i < float_size; ++i){
+		product = float4(swizzle<3,0,2,1>((__m128)product,(__m128)product)) * float4(1.0f,1.0f,1.01f,1.0f) + float4(0.0f,1.0f,0.0f,0.0f);
+		//product = float4((float)product.w(),((float)product.x()) + 1.0f,((float)product.z()*1.01),(float)product.y());
+	}
+
+	std::cout << (float)product.x() << ','  << (float)product.y() << ',' << (float)product.z() << ',' << (float)product.w() << std::endl;
 }

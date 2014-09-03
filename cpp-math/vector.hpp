@@ -83,7 +83,7 @@ public:
 			uint16_t returned_mask = _mm_movemask_epi8(input_as_intvec);
 			return returned_mask;
 		}
-
+		
 	private:
 		__f128 _data;
 	};
@@ -102,6 +102,10 @@ public:
 	
 	CPPMATH_INLINE operator __m128() const {
 		return _data.reg;
+	}
+	
+	CPPMATH_INLINE operator __f128() const {
+		return _data;
 	}
 	
 	CPPMATH_INLINE bool operator != (const float1& other) const {
@@ -200,6 +204,8 @@ public:
 		__f128 _data;
 	};
 
+	CPPMATH_INLINE float4(){
+	}
 
 	CPPMATH_INLINE float4(const float& x, const float& y, const float& z, const float& w = 0.0f){
 		_data.reg = _mm_set_ps(x,y,z,w);
@@ -209,8 +215,16 @@ public:
 		_data.reg = v;
 	}
 
+	CPPMATH_INLINE explicit float4(const float1& v){
+		_data.reg = swizzle<0,0,0,0>((__m128)v,(__m128)v);
+	}
+
 	CPPMATH_INLINE operator __m128 () const {
 		return _data.reg;
+	}
+
+	CPPMATH_INLINE operator __f128() const {
+		return _data;
 	}
 
 	CPPMATH_INLINE float1 x() const {
@@ -270,7 +284,232 @@ public:
 	CPPMATH_INLINE float4 operator / (const float4& other){
 		return float4(_mm_div_ps(_data.reg,(__m128)other));
 	}
+	
+	static CPPMATH_INLINE float4 fill(const float& value){
+		return float4(_mm_set1_ps(value));
+	}
 
 private:
 	__f128 _data;
 };
+
+BOOST_ALIGNMENT(16) union __i128 {
+	struct {
+		int w, z, y, x;
+	} floats;
+	__m128i reg;
+};
+
+class intcomparator{
+public:
+	CPPMATH_INLINE explicit intcomparator(const __m128i& v){
+		_data.reg = v;
+	}
+
+	CPPMATH_INLINE operator __m128i () const {
+		return _data.reg;
+	}
+		
+	CPPMATH_INLINE intcomparator operator == (const intcomparator& other) const {
+		return intcomparator(_mm_cmpeq_epi32(_data.reg,(__m128i)other));
+	}
+		
+	CPPMATH_INLINE intcomparator operator != (const intcomparator& other) const {
+		return ~(*this == other);
+	}
+		
+	CPPMATH_INLINE intcomparator operator > (const intcomparator& other) const {
+		return intcomparator(_mm_cmpgt_epi32(_data.reg,(__m128i)other));
+	}
+		
+	CPPMATH_INLINE intcomparator operator >= (const intcomparator& other) const {
+		return ~(*this < other);
+	}
+		
+	CPPMATH_INLINE intcomparator operator < (const intcomparator& other) const {
+		return intcomparator(_mm_cmplt_epi32(_data.reg,(__m128i)other));
+	}
+		
+	CPPMATH_INLINE intcomparator operator <= (const intcomparator& other) const {
+		return ~(*this > other);
+	}
+		
+	CPPMATH_INLINE intcomparator operator ~ () const {
+		return intcomparator(_mm_xor_si128(_mm_set1_epi32(0xFFFFFFFF),_data.reg));
+	}
+
+	static CPPMATH_INLINE uint16_t mask(const intcomparator& input){
+		__m128i input_as_intvec = (__m128i)input;
+		uint16_t returned_mask = _mm_movemask_epi8(input_as_intvec);
+		return returned_mask;
+	}
+
+private:
+	__i128 _data;
+};
+
+class int1{
+public:
+	typedef int1 component_type;
+	typedef int value_type;
+
+	typedef intcomparator int1comparator;
+
+	CPPMATH_INLINE int1(const int& v){
+		_data.reg = _mm_set1_epi32(v);
+	}
+
+	CPPMATH_INLINE explicit int1(const __m128i& v){
+		_data.reg = v;
+	}
+
+	CPPMATH_INLINE operator __m128i () const {
+		return _data.reg;
+	}
+	
+	CPPMATH_INLINE bool operator != (const int1& other){
+		const int1comparator us((__m128i)*this);
+		const int1comparator them((__m128i)other);
+		const uint16_t test = int1comparator::mask(us!=them);
+		return test != 0x0;
+	}
+	
+	CPPMATH_INLINE bool operator == (const int1& other){
+		const int1comparator us((__m128i)*this);
+		const int1comparator them((__m128i)other);
+		const uint16_t test = int1comparator::mask(us==them);
+		return test == std::numeric_limits<uint16_t>::max();
+	}
+
+	CPPMATH_INLINE int1 operator & (const int1& other){
+		return int1(_mm_and_si128(_data.reg,(__m128i)other));
+	}
+		
+	CPPMATH_INLINE int1 operator | (const int1& other){
+		return int1(_mm_or_si128(_data.reg,(__m128i)other));
+	}
+		
+	CPPMATH_INLINE int1 operator ^ (const int1& other){
+		return int1(_mm_xor_si128(_data.reg,(__m128i)other));
+	}
+
+	CPPMATH_INLINE int1 operator + (const int1& other){
+		return int1(_mm_add_epi32(_data.reg,(__m128i)other));
+	}
+	
+	CPPMATH_INLINE int1 operator - (const int1& other){
+		return int1(_mm_sub_epi32(_data.reg,(__m128i)other));
+	}
+	
+	CPPMATH_INLINE int1 operator * (const int1& other){
+		return int1(_mm_mul_epi32(_data.reg,(__m128i)other));
+	}
+	/*
+	CPPMATH_INLINE int1 operator / (const int1& other){
+		return int1(0);//_mm_div_epi32(_data.reg,(__m128i)other));
+	}
+		There's no integer division instruction in any generation of sse
+		Need to write one ! ... Though it'll be slow
+	*/
+private:
+	__i128 _data;
+};
+
+class int4{
+public:
+	typedef int4 component_type;
+	typedef int value_type;
+
+	typedef intcomparator int4comparator;
+
+	CPPMATH_INLINE int4(const int& x, const int& y, const int& z, const int& w = 0){
+		_data.reg = _mm_set_epi32(x,y,z,w);
+	}
+
+	CPPMATH_INLINE explicit int4(const __m128i& v){
+		_data.reg = v;
+	}
+
+	CPPMATH_INLINE operator __m128i () const {
+		return _data.reg;
+	}
+	
+	CPPMATH_INLINE bool operator != (const int4& other){
+		const int4comparator us((__m128i)*this);
+		const int4comparator them((__m128i)other);
+		const uint16_t test = int4comparator::mask(us!=them);
+		return test != 0x0;
+	}
+	
+	CPPMATH_INLINE bool operator == (const int4& other){
+		const int4comparator us((__m128i)*this);
+		const int4comparator them((__m128i)other);
+		const uint16_t test = int4comparator::mask(us==them);
+		return test == std::numeric_limits<uint16_t>::max();
+	}
+
+	CPPMATH_INLINE int4 operator & (const int4& other){
+		return int4(_mm_and_si128(_data.reg,(__m128i)other));
+	}
+		
+	CPPMATH_INLINE int4 operator | (const int4& other){
+		return int4(_mm_or_si128(_data.reg,(__m128i)other));
+	}
+		
+	CPPMATH_INLINE int4 operator ^ (const int4& other){
+		return int4(_mm_xor_si128(_data.reg,(__m128i)other));
+	}
+
+	CPPMATH_INLINE int4 operator + (const int4& other){
+		return int4(_mm_add_epi32(_data.reg,(__m128i)other));
+	}
+	
+	CPPMATH_INLINE int4 operator - (const int4& other){
+		return int4(_mm_sub_epi32(_data.reg,(__m128i)other));
+	}
+	
+	CPPMATH_INLINE int4 operator * (const int4& other){
+		return int4(_mm_mul_epi32(_data.reg,(__m128i)other));
+	}
+	/*
+	CPPMATH_INLINE int4 operator / (const int4& other){
+		return int4(0);//_mm_div_epu32(_data.reg,(__m128i)other));
+	}
+		There's no integer division instruction in any generation of sse
+		Need to write one ! ... Though it'll be slow
+	*/
+private:
+	__i128 _data;
+};
+
+CPPMATH_INLINE float1 min(const float1& a, const float1& b){
+	return float1(_mm_min_ss(a,b));
+}
+
+CPPMATH_INLINE float4 min(const float4& a, const float4& b){
+	return float4(_mm_min_ps(a,b));
+}
+
+CPPMATH_INLINE int1 min(const int1& a, const int1& b){
+	return int1(_mm_min_epi32(a,b));
+}
+
+CPPMATH_INLINE int4 min(const int4& a, const int4& b){
+	return int4(_mm_min_epi32(a,b));
+}
+
+CPPMATH_INLINE float4 max(const float4& a, const float4& b){
+	return float4(_mm_max_ps(a,b));
+}
+
+CPPMATH_INLINE float1 max(const float1& a, const float1& b){
+	return float1(_mm_max_ss(a,b));
+}
+
+CPPMATH_INLINE int1 max(const int1& a, const int1& b){
+	return int1(_mm_max_epi32(a,b));
+}
+
+CPPMATH_INLINE int4 max(const int4& a, const int4& b){
+	return int4(_mm_max_epi32(a,b));
+}
